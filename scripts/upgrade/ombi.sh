@@ -1,29 +1,49 @@
 #!/bin/bash
-if [[ ! -f /install/.ombi.lock ]]; then
-    echo_error "Ombi not installed"
-    exit 1
+
+# Variables
+OMBI_DIR="/opt/Ombi"
+OMBI_SERVICE="ombi"
+BACKUP_DIR="/opt/Ombi_Backup"
+
+# Function to get the latest release URL
+get_latest_release_url() {
+  curl -s https://api.github.com/repos/Ombi-app/Ombi/releases/latest | grep "browser_download_url.*linux-x64.tar.gz" | cut -d '"' -f 4
+}
+
+# Check if the current user has root privileges
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 
+   exit 1
 fi
 
-if ! grep -q apt.ombi.app /etc/apt/sources.list.d/ombi.list; then
+# Stop the Ombi service
+echo "Stopping Ombi service..."
+systemctl stop $OMBI_SERVICE
 
-    echo_info "Upgrading ombi apt sources"
-    curl -sSL https://apt.ombi.app/pub.key | gpg --dearmor > /usr/share/keyrings/ombi-archive-keyring.gpg 2>> "${log}"
-    echo "deb [signed-by=/usr/share/keyrings/ombi-archive-keyring.gpg] https://apt.ombi.app/master jessie main" > /etc/apt/sources.list.d/ombi.list
+# Backup current Ombi installation
+echo "Backing up current Ombi installation to $BACKUP_DIR..."
+mkdir -p $BACKUP_DIR
+cp -r $OMBI_DIR/* $BACKUP_DIR
 
-    echo_progress_start "Backing up old Ombi config and database"
-    mkdir -p /root/swizzin/backups/ombiv3
-    cp -R /etc/Ombi /root/swizzin/backups/ombivx
-    echo_progress_done "Backed up to /root/swizzin/backups/ombivx"
+# Download the latest Ombi release
+OMBI_URL=$(get_latest_release_url)
+echo "Downloading the latest Ombi release from $OMBI_URL..."
+wget -O /tmp/Ombi-linux.tar.gz $OMBI_URL
 
-    apt_update
-    apt_install ombi
-    if [[ -f /install/.nginx.lock ]]; then
-        bash /etc/swizzin/scripts/nginx/ombi.sh
-        systemctl reload nginx
-    else
-        echo_info "Ombi will be running on port 3000"
-    fi
-    echo_success "Ombi upgraded"
-else
-    echo_info "Please upgrade ombi through apt"
-fi
+# Extract the new version
+echo "Extracting the new version..."
+tar -xzf /tmp/Ombi-linux.tar.gz -C $OMBI_DIR
+
+# Clean up
+echo "Cleaning up..."
+rm /tmp/Ombi-linux.tar.gz
+
+# Ensure the correct permissions
+echo "Setting permissions..."
+chown -R ombi:ombi $OMBI_DIR
+
+# Restart the Ombi service
+echo "Restarting Ombi service..."
+systemctl start $OMBI_SERVICE
+
+echo "Ombi has been updated successfully!"
